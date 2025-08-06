@@ -385,32 +385,37 @@ ${transcript}
   }
 });
  
+app.post('/api/vapi/webhook', (req, res) => {
+  const { message } = req.body;
 
-app.post('/api/vapi/webhook', async (req, res) => {
-  const { type, call, summary, transcript } = req.body;
-
-  if (!type) {
-    return res.status(400).send('Missing type in payload.');
+  if (!message || !message.type) {
+    return res.status(400).send('Missing message type.');
   }
 
-  if (type === 'end-of-call-report') {
-    console.log('📋 End of call report received');
-    console.log('📝 Summary:', summary);
-    console.log('🗣 Transcript:', transcript);
-    if (call?.id) console.log('📞 Call ID:', call.id);
-  } else if (type === 'status-update' && call) {
-    console.log(`📞 Webhook received - Call ID: ${call.id}, Status: ${call.status}`);
-  } else {
-    console.log('ℹ️ Unknown webhook type:', type);
+  if (message.type === 'status-update') {
+    console.log('Status Update:', message.status);
+    if (message.call && message.call.id) {
+      console.log('Call ID:', message.call.id);
+    }
+  }
+
+  if (message.type === 'end-of-call-report') {
+    console.log('End of Call Report:', message.summary);
+    if (message.transcript) {
+      console.log('Transcript:', message.transcript);
+    }
+    if (message.call && message.call.id) {
+      console.log('Call ID:', message.call.id);
+    }
   }
 
   res.status(200).send('OK');
 });
-
 
   
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
+
 
