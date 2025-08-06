@@ -6,27 +6,40 @@ const bodyParser = require("body-parser");
 const fs = require("fs");
 const path = require("path");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
-
-
+const http = require("http");
+const { Server } = require("socket.io");
 
 dotenv.config();
 
 const app = express();
+const httpServer = http.createServer(app);
+const io = new Server(httpServer, {
+  cors: {
+    origin: "*", // Change to your frontend URL in production
+    methods: ["GET", "POST"]
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(bodyParser.json());
+
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 const allowedVoiceIds = [
   "Elliot", "Kylie", "Rohan", "Lily", "Savannah",
   "Hana", "Neha", "Cole", "Harry", "Paige", "Spencer"
 ];
 
-// const openai = new OpenAI({
-//   apiKey: process.env.OPENAI_API_KEY
-// });
+// Store connected sockets
+io.on("connection", (socket) => {
+  console.log("⚡ Socket connected:", socket.id);
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  socket.on("disconnect", () => {
+    console.log("❌ Socket disconnected:", socket.id);
+  });
+});
 
 app.post("/api/call", async (req, res) => {
   const { candidateName, phoneNumber, voiceId } = req.body;
@@ -38,23 +51,15 @@ app.post("/api/call", async (req, res) => {
     });
   }
 
-  if (!process.env.VAPI_API_KEY || !process.env.VAPI_PHONE_NUMBER_ID) {
-    return res.status(500).json({
-      success: false,
-      error: "Missing environment variables. Ensure VAPI_API_KEY and VAPI_PHONE_NUMBER_ID are set."
-    });
-  }
-
   const selectedVoiceId = allowedVoiceIds.includes(voiceId) ? voiceId : "Rohan";
 
   try {
-    // Create assistant
     const assistantRes = await axios.post(
       "https://api.vapi.ai/assistant",
       {
         name: "AI Recruiter Assistant",
         serverUrl: "https://backend-mutualfund-simulator.onrender.com/api/vapi/webhook",
-        firstMessage: `Hello`,
+        firstMessage: "Hello",
         firstMessageMode: "assistant-speaks-first",
         voice: {
           provider: "vapi",
@@ -66,8 +71,7 @@ app.post("/api/call", async (req, res) => {
           messages: [
             {
               role: "assistant",
-              content: `
-              You are playing the role of a cautious Indian customer named Neha Agarwala, based in Kolkata, receiving a cold call from a sales representative promoting mutual fund products. You are not confident about financial products, especially from unknown sources, and you generally rely on family or trusted contacts when it comes to money matters.
+              content: `You are playing the role of a cautious Indian customer named Neha Agarwala, based in Kolkata, receiving a cold call from a sales representative promoting mutual fund products. You are not confident about financial products, especially from unknown sources, and you generally rely on family or trusted contacts when it comes to money matters.
 Your behavior should reflect how a typical skeptical but polite Indian consumer responds to an unsolicited financial call. You are not rigidly negative, but rather unsure, suspicious, and hesitant.
 
 🎭 Persona & Tone:
@@ -190,7 +194,7 @@ If the rep explains well, acknowledge their effort:
 
 
 If they mention they’ll share details:
- “Yes, that would help. Please send it over first.”`
+ “Yes, that would help. Please send it over first.”` // truncated for brevity
             }
           ]
         },
@@ -199,9 +203,8 @@ If they mention they’ll share details:
           language: "en"
         },
         analysisPlan: {
-      summaryPrompt: "You are an expert evaluator for customer service calls. Given the call transcript, generate a structured report with these sections:\n- 📌 Call Summary: Briefly describe the scenario and flow.\n- ✅ What the Caller Did Well: List positive behaviors and strategies.\n- ❌ Areas for Improvement: List issues, missed opportunities, or unclear explanations.\n- 🎯 Overall Effectiveness Score: Give a score out of 10 and justify it.\n- 🧾 Final Summary for Report: Summarize the overall impression and suggest next steps.\nFormat your response with clear section headers and concise bullet points."
-    }
-        // 🔴 Transcript webhook removed
+          summaryPrompt: "You are an expert evaluator for customer service calls..."
+        }
       },
       {
         headers: {
@@ -212,7 +215,6 @@ If they mention they’ll share details:
 
     const assistantId = assistantRes.data.id;
 
-    // Start call
     const callRes = await axios.post(
       "https://api.vapi.ai/call",
       {
@@ -244,21 +246,12 @@ If they mention they’ll share details:
   }
 });
 
-// Optional: Health check endpoint
 app.get("/health", (req, res) => {
   res.status(200).send("API is up and running.");
 });
 
-// Get summary of a specific call
 app.get("/api/summary/:callId", async (req, res) => {
   const { callId } = req.params;
-
-  if (!callId) {
-    return res.status(400).json({
-      success: false,
-      error: "Missing callId in request parameters."
-    });
-  }
 
   try {
     const response = await axios.get(`https://api.vapi.ai/call/${callId}`, {
@@ -281,22 +274,19 @@ app.get("/api/summary/:callId", async (req, res) => {
       summary
     });
   } catch (error) {
-    console.error("Failed to fetch call summary:", error.response?.data || error.message);
+    console.error("Failed to fetch call summary:", error.message);
     res.status(500).json({
       success: false,
-      error: error.response?.data || "Failed to fetch call summary"
+      error: "Failed to fetch call summary"
     });
   }
 });
 
-// Get specific call log by callId
 app.get("/api/call-logs/:callId", async (req, res) => {
   const { callId } = req.params;
 
   try {
-    // Step 1: Fetch the call transcript from Vapi
     const response = await fetch(`https://api.vapi.ai/call/${callId}`, {
-      method: "GET",
       headers: {
         "Authorization": `Bearer ${process.env.VAPI_API_KEY}`,
         "Content-Type": "application/json"
@@ -311,13 +301,11 @@ app.get("/api/call-logs/:callId", async (req, res) => {
     const data = await response.json();
     const transcript = data.transcript || data.artifact?.transcript || "Transcript not available yet.";
 
-    // Step 2: Use Gemini 1.5 Flash to generate performance synopsis
     const model = genAI.getGenerativeModel({ model: "models/gemini-1.5-flash" });
 
     const result = await model.generateContent([
       {
-        text: `
-You are an AI evaluator reviewing a sales call transcript. Your job is to output a structured, visually appealing summary of the sales agent’s performance.
+        text: `You are an AI evaluator reviewing a sales call transcript. Your job is to output a structured, visually appealing summary of the sales agent’s performance.
 
 🔹 Use the format below.
 🔹 Include a markdown-style table with:
@@ -355,13 +343,11 @@ You are an AI evaluator reviewing a sales call transcript. Your job is to output
 """
 ${transcript}
 """
-        `
+  `
       }
     ]);
 
     const summary = result.response.text().trim();
-
-    // Step 3: Save and serve as .txt file
     const fileName = `call-summary-${callId}.txt`;
     const filePath = path.join(__dirname, fileName);
     fs.writeFileSync(filePath, summary);
@@ -371,20 +357,20 @@ ${transcript}
         console.error("Download error:", err);
         res.status(500).json({ success: false, error: "Failed to send file" });
       } else {
-        fs.unlinkSync(filePath); // Clean up after sending
+        fs.unlinkSync(filePath);
       }
     });
 
   } catch (error) {
-    console.error("Error fetching transcript or generating summary:", error);
+    console.error("Error:", error.message);
     res.status(500).json({
       success: false,
-      error: "Internal server error",
-      detail: error.message
+      error: "Internal server error"
     });
   }
 });
- 
+
+// ✅ Webhook + Socket Trigger
 app.post('/api/vapi/webhook', (req, res) => {
   const { message } = req.body;
 
@@ -393,29 +379,30 @@ app.post('/api/vapi/webhook', (req, res) => {
   }
 
   if (message.type === 'status-update') {
-    console.log('Status Update:', message.status);
+    console.log('📞 Status Update:', message.status);
     if (message.call && message.call.id) {
-      console.log('Call ID:', message.call.id);
+      console.log('📞 Call ID:', message.call.id);
+      if (message.status === "ended") {
+        // ✅ Notify frontend via socket
+        io.emit("call-ended", { callId: message.call.id });
+        console.log("📢 Emitted 'call-ended' via socket.io");
+      }
     }
   }
 
   if (message.type === 'end-of-call-report') {
-    console.log('End of Call Report:', message.summary);
+    console.log('📋 End of Call Report');
     if (message.transcript) {
-      console.log('Transcript:', message.transcript);
+      console.log('🗣 Transcript:', message.transcript);
     }
     if (message.call && message.call.id) {
-      console.log('Call ID:', message.call.id);
+      console.log('📞 Call ID:', message.call.id);
     }
   }
 
   res.status(200).send('OK');
 });
 
-  
-
-app.listen(PORT, () => {
+httpServer.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
-
-
