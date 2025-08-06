@@ -53,7 +53,7 @@ app.post("/api/call", async (req, res) => {
       "https://api.vapi.ai/assistant",
       {
         name: "AI Recruiter Assistant",
-        serverUrl: "https://your-backend.com/webhook/vapi",
+        serverUrl: "https://backend-mutualfund-simulator.onrender.com/api/vapi/webhook",
         firstMessage: `Hello`,
         firstMessageMode: "assistant-speaks-first",
         voice: {
@@ -384,27 +384,29 @@ ${transcript}
     });
   }
 });
-app.post('/webhook/vapi', (req, res) => {
-  const { type, call } = req.body;
+ 
 
-  if (type === 'status-update' && call) {
+app.post('/api/vapi/webhook', async (req, res) => {
+  const { type, call, summary, transcript } = req.body;
+
+  if (!type) {
+    return res.status(400).send('Missing type in payload.');
+  }
+
+  if (type === 'end-of-call-report') {
+    console.log('📋 End of call report received');
+    console.log('📝 Summary:', summary);
+    console.log('🗣 Transcript:', transcript);
+    if (call?.id) console.log('📞 Call ID:', call.id);
+  } else if (type === 'status-update' && call) {
     console.log(`📞 Webhook received - Call ID: ${call.id}, Status: ${call.status}`);
+  } else {
+    console.log('ℹ️ Unknown webhook type:', type);
   }
 
   res.status(200).send('OK');
 });
 
-app.post('/webhook/vapi', (req, res) => {
-  const { message } = req.body;
-  if (!message) return res.status(400).send('No message in payload.');
-
-  if (message.type === 'end-of-call-report') {
-    // Handle the end-of-call-report here
-    console.log('End of call report:', message);
-    // You can process summary, transcript, messages, etc. from message
-  } else if (message.type === 'status-update' && message.call) {
-    console.log(`📞 Webhook received - Call ID: ${message.call.id}, Status: ${message.call.status}`);
-  }
 
   res.status(200).send('OK');
 });
