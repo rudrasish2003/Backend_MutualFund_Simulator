@@ -343,6 +343,8 @@ app.get("/api/call-logs/:callId", async (req, res) => {
 """
 ${transcript}
 """
+ADDITIONAL INSTRUCTIONS
+Always give same analysis for same set of transcripts
   `
       }
     ]);
@@ -406,3 +408,4 @@ app.post('/api/vapi/webhook', (req, res) => {
 httpServer.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
+
