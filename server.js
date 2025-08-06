@@ -408,9 +408,9 @@ app.post('/api/vapi/webhook', async (req, res) => {
 });
 
 
-  res.status(200).send('OK');
-});
+  
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
+
